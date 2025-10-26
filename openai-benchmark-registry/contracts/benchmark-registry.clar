@@ -201,3 +201,183 @@
     (ok true)
   )
 )
+
+;; #[allow(unchecked_data)]
+(define-public (add-verifier (verifier principal))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (map-set model-verifiers verifier true)
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (remove-verifier (verifier principal))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (map-set model-verifiers verifier false)
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (toggle-verifier (verifier principal))
+  (let
+    (
+      (current-status (is-verifier verifier))
+    )
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (map-set model-verifiers verifier (not current-status))
+    (ok (not current-status))
+  )
+)
+
+(define-public (update-benchmark-description (benchmark-id uint) (new-description (string-ascii 200)))
+  (let
+    (
+      (benchmark-data (unwrap! (map-get? benchmarks benchmark-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get created-by benchmark-data)) err-unauthorized)
+    (map-set benchmarks benchmark-id
+      (merge benchmark-data { description: new-description })
+    )
+    (ok true)
+  )
+)
+
+(define-public (update-platform-fee (new-fee uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (<= new-fee u1000) err-invalid-score) ;; Max 10% fee
+    (var-set platform-fee new-fee)
+    (ok true)
+  )
+)
+
+(define-public (delete-submission (submission-id uint))
+  (let
+    (
+      (submission-data (unwrap! (map-get? submissions submission-id) err-not-found))
+    )
+    (asserts! (or 
+      (is-eq tx-sender (get submitter submission-data))
+      (is-eq tx-sender contract-owner)
+    ) err-unauthorized)
+    (map-delete submissions submission-id)
+    (ok true)
+  )
+)
+
+(define-public (update-submission-score (submission-id uint) (new-score uint))
+  (let
+    (
+      (submission-data (unwrap! (map-get? submissions submission-id) err-not-found))
+      (benchmark-data (unwrap! (map-get? benchmarks (get benchmark-id submission-data)) err-not-found))
+    )
+    (asserts! (is-verifier tx-sender) err-unauthorized)
+    (asserts! (<= new-score (get max-score benchmark-data)) err-invalid-score)
+    (map-set submissions submission-id
+      (merge submission-data { score: new-score })
+    )
+    (ok true)
+  )
+)
+
+(define-public (archive-benchmark (benchmark-id uint))
+  (let
+    (
+      (benchmark-data (unwrap! (map-get? benchmarks benchmark-id) err-not-found))
+    )
+    (asserts! (or 
+      (is-eq tx-sender (get created-by benchmark-data))
+      (is-eq tx-sender contract-owner)
+    ) err-unauthorized)
+    ;; In a real implementation, we'd add an 'archived' field
+    ;; For now, we'll just return success
+    (ok true)
+  )
+)
+
+(define-public (reward-top-performer (benchmark-id uint) (reward-amount uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (is-some (map-get? benchmarks benchmark-id)) err-not-found)
+    ;; In a real implementation, this would identify top performer and send reward
+    ;; This is a placeholder
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (submit-with-metadata 
+  (benchmark-id uint) 
+  (model-name (string-ascii 50)) 
+  (score uint) 
+  (result-hash (buff 32))
+  (metadata (string-ascii 200)))
+  (let
+    (
+      (benchmark-data (unwrap! (map-get? benchmarks benchmark-id) err-not-found))
+      (submission-id (var-get submission-count))
+    )
+    (asserts! (<= score (get max-score benchmark-data)) err-invalid-score)
+    (map-set submissions submission-id
+      {
+        benchmark-id: benchmark-id,
+        model-name: model-name,
+        submitter: tx-sender,
+        score: score,
+        result-hash: result-hash,
+        verified: false,
+        submitted-at: stacks-block-height
+      }
+    )
+    (var-set submission-count (+ submission-id u1))
+    ;; Store metadata as a comment
+    (unwrap-panic (add-comment submission-id metadata))
+    (ok submission-id)
+  )
+)
+
+(define-public (bulk-create-benchmarks (benchmarks-data (list 5 { name: (string-ascii 50), desc: (string-ascii 200), max: uint })))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (ok (map create-single-benchmark benchmarks-data))
+  )
+)
+
+(define-private (create-single-benchmark (data { name: (string-ascii 50), desc: (string-ascii 200), max: uint }))
+  (let
+    (
+      (benchmark-id (var-get benchmark-count))
+    )
+    (map-set benchmarks benchmark-id
+      {
+        name: (get name data),
+        description: (get desc data),
+        max-score: (get max data),
+        created-by: tx-sender,
+        created-at: stacks-block-height
+      }
+    )
+    (var-set benchmark-count (+ benchmark-id u1))
+    benchmark-id
+  )
+)
+
+;; Emergency pause functionality
+(define-public (pause-contract)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (var-set contract-paused true)
+    (ok true)
+  )
+)
+
+(define-public (unpause-contract)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (var-set contract-paused false)
+    (ok true)
+  )
+)
