@@ -131,3 +131,73 @@
 (define-private (check-contract-active)
   (not (var-get contract-paused))
 )
+
+;; #[allow(unchecked_data)]
+(define-public (create-category (category-name (string-ascii 50)) (description (string-ascii 150)))
+  (let
+    (
+      (category-id (var-get category-count))
+    )
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (map-set benchmark-categories category-id
+      {
+        category-name: category-name,
+        description: description
+      }
+    )
+    (var-set category-count (+ category-id u1))
+    (ok category-id)
+  )
+)
+
+(define-public (assign-benchmark-to-category (benchmark-id uint) (category-id uint))
+  (begin
+    (asserts! (is-some (map-get? benchmarks benchmark-id)) err-not-found)
+    (asserts! (is-some (map-get? benchmark-categories category-id)) err-not-found)
+    (map-set benchmark-to-category benchmark-id category-id)
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (add-comment (submission-id uint) (comment (string-ascii 500)))
+  (let
+    (
+      (comment-id (var-get comment-count))
+      (submission-data (unwrap! (map-get? submissions submission-id) err-not-found))
+    )
+    (map-set submission-comments comment-id
+      {
+        submission-id: submission-id,
+        commenter: tx-sender,
+        comment: comment,
+        commented-at: stacks-block-height
+      }
+    )
+    (var-set comment-count (+ comment-id u1))
+    (ok comment-id)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (increment-submitter-reputation (submitter principal) (score uint) (verified bool))
+  (let
+    (
+      (current-rep (get-submitter-reputation submitter))
+      (new-total-submissions (+ (get total-submissions current-rep) u1))
+      (new-verified-count (if verified
+        (+ (get verified-submissions current-rep) u1)
+        (get verified-submissions current-rep)))
+      (new-total-score (+ (get total-score current-rep) score))
+    )
+    (map-set submitter-reputation submitter
+      {
+        total-submissions: new-total-submissions,
+        verified-submissions: new-verified-count,
+        total-score: new-total-score,
+        reputation-points: (+ (* new-verified-count u10) (/ new-total-score u100))
+      }
+    )
+    (ok true)
+  )
+)
